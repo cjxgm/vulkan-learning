@@ -1,0 +1,5 @@
+= vulkan info
+
+Obtaining some information about Vulkan.
+Enabling validation layers BTW.
+
