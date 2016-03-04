@@ -110,23 +110,15 @@ namespace vulkan
 
     inline namespace types
     {
-        template <class T>
-        using dispatchable_handle = std::unique_ptr<std::remove_pointer_t<T>, std::function<void (T)>>;
-
-        template <class T>
-        using dispatchable_handle_destroyer = void (T, VkAllocationCallbacks const*);
+        template <class T> using dispatchable_handle = std::unique_ptr<std::remove_pointer_t<T>, std::function<void (T)>>;
+        template <class T> using handle_destroyer = void (T, VkAllocationCallbacks const*);
+        template <class T> using dependent_handle_destroyer = void (VkInstance, T, VkAllocationCallbacks const*);
 
         using instance_handle = dispatchable_handle<VkInstance>;
-
-        template <class T>
-        using dependent_handle = std::unique_ptr<std::remove_pointer_t<T>, std::function<void (T)>>;
-
-        template <class T>
-        using dependent_handle_destroyer = void (VkInstance, T, VkAllocationCallbacks const*);
     }
 
     template <class T>
-    auto handle(T raw, dispatchable_handle_destroyer<T>* destroyer, VkAllocationCallbacks const* alloc={})
+    auto handle(T raw, handle_destroyer<T>* destroyer, VkAllocationCallbacks const* alloc={})
     {
         return dispatchable_handle<T>{raw, [destroyer, alloc] (auto x) { destroyer(x, alloc); }};
     }
@@ -134,7 +126,7 @@ namespace vulkan
     template <class T>
     auto handle(T raw, VkInstance instance, dependent_handle_destroyer<T>* destroyer, VkAllocationCallbacks const* alloc={})
     {
-        return dependent_handle<T>{raw, [instance, destroyer, alloc] (auto x) { destroyer(instance, x, alloc); }};
+        return dispatchable_handle<T>{raw, [instance, destroyer, alloc] (auto x) { destroyer(instance, x, alloc); }};
     }
 
     auto instance(
