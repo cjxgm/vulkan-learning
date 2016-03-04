@@ -1,4 +1,5 @@
 // ml:ldf += -lvulkan
+// ml:run = env VK_LAYER_PATH=/usr/share/vulkan/explicit_layer.d $bin
 #include <vector>
 #include <sstream>
 #include <iostream>
@@ -71,6 +72,11 @@ namespace vulkan
             return (std::cerr << "\e[0;30;41m ERROR \e[0m ");
         }
 
+        std::ostream & debug(std::string const& msg)
+        {
+            return (std::cerr << "\e[0;30;44m " << msg << " \e[0m ");
+        }
+
         std::ostream & info()
         {
             return (std::cout << "\e[0;30;42m INFO \e[0m ");
@@ -98,6 +104,7 @@ namespace vulkan
         {
             if (result == VK_SUCCESS) return;
             error() << result_str(result) << "\n";
+            throw;
         }
     }
 
@@ -110,20 +117,92 @@ namespace vulkan
         using dispatchable_handle_destroyer = void (T, VkAllocationCallbacks const*);
 
         using instance_handle = dispatchable_handle<VkInstance>;
+
+        template <class T>
+        using dependent_handle = std::unique_ptr<std::remove_pointer_t<T>, std::function<void (T)>>;
+
+        template <class T>
+        using dependent_handle_destroyer = void (VkInstance, T, VkAllocationCallbacks const*);
     }
 
     template <class T>
     auto handle(T raw, dispatchable_handle_destroyer<T>* destroyer, VkAllocationCallbacks const* alloc={})
     {
-        return instance_handle{raw, [destroyer, alloc] (auto x) { destroyer(x, alloc); }};
+        return dispatchable_handle<T>{raw, [destroyer, alloc] (auto x) { destroyer(x, alloc); }};
     }
 
-    auto instance(VkInstanceCreateInfo info={}, VkAllocationCallbacks const* alloc={})
+    template <class T>
+    auto handle(T raw, VkInstance instance, dependent_handle_destroyer<T>* destroyer, VkAllocationCallbacks const* alloc={})
     {
-        info.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
+        return dependent_handle<T>{raw, [instance, destroyer, alloc] (auto x) { destroyer(instance, x, alloc); }};
+    }
+
+    auto instance(
+            std::vector<char const*> const& exts={},      // extensions
+            std::vector<char const*> const& layers={},    // layers
+            VkAllocationCallbacks const* alloc={})
+    {
+        VkInstanceCreateInfo info {
+            .sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
+            .enabledExtensionCount = static_cast<uint32_t>(exts.size()),
+            .ppEnabledExtensionNames = exts.data(),
+            .enabledLayerCount = static_cast<uint32_t>(layers.size()),
+            .ppEnabledLayerNames = layers.data(),
+        };
         VkInstance raw;
+
         die_unless(vkCreateInstance(&info, alloc, &raw));
         return handle(raw, vkDestroyInstance, alloc);
+    }
+
+    auto instance_simple(bool debug=true)
+    {
+        if (!debug) return instance();
+        return instance(
+                { VK_EXT_DEBUG_REPORT_EXTENSION_NAME },
+                { "VK_LAYER_LUNARG_standard_validation" });
+    }
+
+    auto debug_report(
+            instance_handle const& h,
+            PFN_vkDebugReportCallbackEXT callback,
+            VkAllocationCallbacks const* alloc={})
+    {
+        #define FETCH(NAME) static auto const NAME = (PFN_ ## NAME)vkGetInstanceProcAddr(&*h, #NAME)
+        FETCH(vkCreateDebugReportCallbackEXT);
+        FETCH(vkDestroyDebugReportCallbackEXT);
+        #undef FETCH
+
+        constexpr auto flags = VK_DEBUG_REPORT_INFORMATION_BIT_EXT |
+            VK_DEBUG_REPORT_WARNING_BIT_EXT |
+            VK_DEBUG_REPORT_PERFORMANCE_WARNING_BIT_EXT |
+            VK_DEBUG_REPORT_ERROR_BIT_EXT;
+
+        VkDebugReportCallbackCreateInfoEXT info {
+            .sType = VK_STRUCTURE_TYPE_DEBUG_REPORT_CREATE_INFO_EXT,
+            .pfnCallback = callback,
+            .flags = flags,
+        };
+
+        VkDebugReportCallbackEXT raw;
+        die_unless(vkCreateDebugReportCallbackEXT(&*h, &info, alloc, &raw));
+        return handle(raw, &*h, vkDestroyDebugReportCallbackEXT, alloc);
+    }
+
+    auto debug_report_simple(instance_handle const& h)
+    {
+        return debug_report(h, [](
+                auto /*flags*/,
+                auto /*ob_type*/,
+                auto /*ob_source*/,
+                auto /*location*/,
+                auto /*code*/,
+                auto layer,
+                auto message,
+                auto /*userdata*/) -> VkBool32 {
+            debug(layer) << message << "\n";
+            return false;
+        });
     }
 
     auto physical_devices(instance_handle const& h)
@@ -151,13 +230,16 @@ namespace vulkan
             props.emplace_back(properties(dev));
         return props;
     }
+
 }
 namespace vk = vulkan;
 
 int main()
 {
     using namespace vk::io;
-    auto instance = vk::instance();
+    auto instance = vk::instance_simple();
+    auto debug = vk::debug_report_simple(instance);
+
     auto physicals = vk::physical_devices(instance);
     auto props_per_phy = vk::properties(physicals);
     (physicals.size() == 0 ? error() : info()) << physicals.size() << " physicals:\n";
