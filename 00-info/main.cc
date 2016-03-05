@@ -108,119 +108,179 @@ namespace vulkan
         }
     }
 
-    inline namespace types
+    inline namespace handles
     {
-        template <class T> using dispatchable_handle = std::unique_ptr<std::remove_pointer_t<T>, std::function<void (T)>>;
-        template <class T> using handle_destroyer = void (T, VkAllocationCallbacks const*);
-        template <class T> using dependent_handle_destroyer = void (VkInstance, T, VkAllocationCallbacks const*);
+        template <class T>
+        using dispatchable_handle = std::unique_ptr<
+                std::remove_pointer_t<T>,
+                std::function<void (T)>>;
+
+        template <class T>
+        using handle_destroyer = void (
+                T,
+                VkAllocationCallbacks const*);
+
+        template <class T>
+        using handle_from_instance_destroyer = void (
+                VkInstance,
+                T,
+                VkAllocationCallbacks const*);
+
+        template <class T>
+        using handle_from_device_destroyer = void (
+                VkDevice,
+                T,
+                VkAllocationCallbacks const*);
 
         using instance_handle = dispatchable_handle<VkInstance>;
+        using device_handle = dispatchable_handle<VkDevice>;
+
+        using instance_handle_cref = instance_handle const&;
+        using device_handle_cref = device_handle const&;
+
+        template <class T>
+        auto handle(
+                T raw,
+                handle_destroyer<T>* destroyer,
+                VkAllocationCallbacks const* alloc={})
+        {
+            return dispatchable_handle<T>{
+                raw,
+                [destroyer, alloc] (auto x) {
+                    destroyer(x, alloc);
+                }
+            };
+        }
+
+        template <class T>
+        auto handle(
+                T raw,
+                instance_handle_cref h,
+                handle_from_instance_destroyer<T>* destroyer,
+                VkAllocationCallbacks const* alloc={})
+        {
+            return dispatchable_handle<T>{
+                raw,
+                [h=&*h, destroyer, alloc] (auto x) {
+                    destroyer(h, x, alloc);
+                }
+            };
+        }
+
+        template <class T>
+        auto handle(
+                T raw,
+                device_handle_cref h,
+                handle_from_device_destroyer<T>* destroyer,
+                VkAllocationCallbacks const* alloc={})
+        {
+            return dispatchable_handle<T>{
+                raw,
+                [h=&*h, destroyer, alloc] (auto x) {
+                    destroyer(h, x, alloc);
+                }
+            };
+        }
     }
 
-    template <class T>
-    auto handle(T raw, handle_destroyer<T>* destroyer, VkAllocationCallbacks const* alloc={})
+    inline namespace initialization
     {
-        return dispatchable_handle<T>{raw, [destroyer, alloc] (auto x) { destroyer(x, alloc); }};
-    }
+        auto instance(
+                std::vector<char const*> const& exts={},      // extensions
+                std::vector<char const*> const& layers={},    // layers
+                VkAllocationCallbacks const* alloc={})
+        {
+            VkInstanceCreateInfo info {
+                .sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
+                .enabledExtensionCount = static_cast<uint32_t>(exts.size()),
+                .ppEnabledExtensionNames = exts.data(),
+                .enabledLayerCount = static_cast<uint32_t>(layers.size()),
+                .ppEnabledLayerNames = layers.data(),
+            };
+            VkInstance raw;
 
-    template <class T>
-    auto handle(T raw, VkInstance instance, dependent_handle_destroyer<T>* destroyer, VkAllocationCallbacks const* alloc={})
-    {
-        return dispatchable_handle<T>{raw, [instance, destroyer, alloc] (auto x) { destroyer(instance, x, alloc); }};
-    }
+            die_unless(vkCreateInstance(&info, alloc, &raw));
+            return handle(raw, vkDestroyInstance, alloc);
+        }
 
-    auto instance(
-            std::vector<char const*> const& exts={},      // extensions
-            std::vector<char const*> const& layers={},    // layers
-            VkAllocationCallbacks const* alloc={})
-    {
-        VkInstanceCreateInfo info {
-            .sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
-            .enabledExtensionCount = static_cast<uint32_t>(exts.size()),
-            .ppEnabledExtensionNames = exts.data(),
-            .enabledLayerCount = static_cast<uint32_t>(layers.size()),
-            .ppEnabledLayerNames = layers.data(),
-        };
-        VkInstance raw;
+        auto instance_simple(bool debug=true)
+        {
+            if (!debug) return instance();
+            return instance(
+                    { VK_EXT_DEBUG_REPORT_EXTENSION_NAME },
+                    { "VK_LAYER_LUNARG_standard_validation" });
+        }
 
-        die_unless(vkCreateInstance(&info, alloc, &raw));
-        return handle(raw, vkDestroyInstance, alloc);
-    }
+        auto debug_report(
+                instance_handle_cref h,
+                PFN_vkDebugReportCallbackEXT callback,
+                VkAllocationCallbacks const* alloc={})
+        {
+            #define FETCH(NAME) \
+                static auto const NAME = \
+                        (PFN_ ## NAME)vkGetInstanceProcAddr(&*h, #NAME)
+            FETCH(vkCreateDebugReportCallbackEXT);
+            FETCH(vkDestroyDebugReportCallbackEXT);
+            #undef FETCH
 
-    auto instance_simple(bool debug=true)
-    {
-        if (!debug) return instance();
-        return instance(
-                { VK_EXT_DEBUG_REPORT_EXTENSION_NAME },
-                { "VK_LAYER_LUNARG_standard_validation" });
-    }
+            constexpr auto flags =
+                VK_DEBUG_REPORT_INFORMATION_BIT_EXT |
+                VK_DEBUG_REPORT_WARNING_BIT_EXT |
+                VK_DEBUG_REPORT_PERFORMANCE_WARNING_BIT_EXT |
+                VK_DEBUG_REPORT_ERROR_BIT_EXT;
 
-    auto debug_report(
-            instance_handle const& h,
-            PFN_vkDebugReportCallbackEXT callback,
-            VkAllocationCallbacks const* alloc={})
-    {
-        #define FETCH(NAME) static auto const NAME = (PFN_ ## NAME)vkGetInstanceProcAddr(&*h, #NAME)
-        FETCH(vkCreateDebugReportCallbackEXT);
-        FETCH(vkDestroyDebugReportCallbackEXT);
-        #undef FETCH
+            VkDebugReportCallbackCreateInfoEXT info {
+                .sType = VK_STRUCTURE_TYPE_DEBUG_REPORT_CREATE_INFO_EXT,
+                .pfnCallback = callback,
+                .flags = flags,
+            };
 
-        constexpr auto flags = VK_DEBUG_REPORT_INFORMATION_BIT_EXT |
-            VK_DEBUG_REPORT_WARNING_BIT_EXT |
-            VK_DEBUG_REPORT_PERFORMANCE_WARNING_BIT_EXT |
-            VK_DEBUG_REPORT_ERROR_BIT_EXT;
+            VkDebugReportCallbackEXT raw;
+            die_unless(vkCreateDebugReportCallbackEXT(&*h, &info, alloc, &raw));
+            return handle(raw, h, vkDestroyDebugReportCallbackEXT, alloc);
+        }
 
-        VkDebugReportCallbackCreateInfoEXT info {
-            .sType = VK_STRUCTURE_TYPE_DEBUG_REPORT_CREATE_INFO_EXT,
-            .pfnCallback = callback,
-            .flags = flags,
-        };
+        auto debug_report_simple(instance_handle_cref h)
+        {
+            return debug_report(h, [](
+                    auto /*flags*/,
+                    auto /*ob_type*/,
+                    auto /*ob_source*/,
+                    auto /*location*/,
+                    auto /*code*/,
+                    auto layer,
+                    auto message,
+                    auto /*userdata*/) -> VkBool32 {
+                debug(layer) << message << "\n";
+                return false;
+            });
+        }
 
-        VkDebugReportCallbackEXT raw;
-        die_unless(vkCreateDebugReportCallbackEXT(&*h, &info, alloc, &raw));
-        return handle(raw, &*h, vkDestroyDebugReportCallbackEXT, alloc);
-    }
+        auto physical_devices(instance_handle_cref h)
+        {
+            std::vector<VkPhysicalDevice> devs;
+            uint32_t num_devs;
+            die_unless(vkEnumeratePhysicalDevices(&*h, &num_devs, nullptr));
+            devs.resize(num_devs);
+            die_unless(vkEnumeratePhysicalDevices(&*h, &num_devs, devs.data()));
+            return devs;
+        }
 
-    auto debug_report_simple(instance_handle const& h)
-    {
-        return debug_report(h, [](
-                auto /*flags*/,
-                auto /*ob_type*/,
-                auto /*ob_source*/,
-                auto /*location*/,
-                auto /*code*/,
-                auto layer,
-                auto message,
-                auto /*userdata*/) -> VkBool32 {
-            debug(layer) << message << "\n";
-            return false;
-        });
-    }
+        auto properties(VkPhysicalDevice dev)
+        {
+            VkPhysicalDeviceProperties props;
+            vkGetPhysicalDeviceProperties(dev, &props);
+            return props;
+        }
 
-    auto physical_devices(instance_handle const& h)
-    {
-        std::vector<VkPhysicalDevice> devs;
-        uint32_t num_devs;
-        die_unless(vkEnumeratePhysicalDevices(&*h, &num_devs, nullptr));
-        devs.resize(num_devs);
-        die_unless(vkEnumeratePhysicalDevices(&*h, &num_devs, devs.data()));
-        return devs;
-    }
-
-    auto properties(VkPhysicalDevice dev)
-    {
-        VkPhysicalDeviceProperties props;
-        vkGetPhysicalDeviceProperties(dev, &props);
-        return props;
-    }
-
-    auto properties(std::vector<VkPhysicalDevice> devs)
-    {
-        std::vector<VkPhysicalDeviceProperties> props;
-        props.reserve(devs.size());
-        for (auto dev: devs)
-            props.emplace_back(properties(dev));
-        return props;
+        auto properties(std::vector<VkPhysicalDevice> devs)
+        {
+            std::vector<VkPhysicalDeviceProperties> props;
+            props.reserve(devs.size());
+            for (auto dev: devs)
+                props.emplace_back(properties(dev));
+            return props;
+        }
     }
 
 }
