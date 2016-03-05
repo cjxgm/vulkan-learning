@@ -11,6 +11,15 @@
 
 namespace vulkan
 {
+    namespace operators
+    {
+        std::ostream & operator << (std::ostream & o, VkExtent3D extent)
+        {
+            return o << "extent<3>{" << extent.width << ", " << extent.height << ", " << extent.depth << "}";
+        }
+    }
+    namespace ops = operators;
+
     inline namespace io
     {
         std::string const& result_str(VkResult result)
@@ -65,6 +74,25 @@ namespace vulkan
                 }
             }
             #undef ENUMERANT
+        }
+
+        std::string queue_flags_str(VkQueueFlags flags)
+        {
+            std::string str{"GCTS"};
+            if ((flags & VK_QUEUE_GRAPHICS_BIT) == 0) str[0] = '-';
+            if ((flags & VK_QUEUE_COMPUTE_BIT) == 0) str[1] = '-';
+            if ((flags & VK_QUEUE_TRANSFER_BIT) == 0) str[2] = '-';
+            if ((flags & VK_QUEUE_SPARSE_BINDING_BIT) == 0) str[3] = '-';
+            return str;
+        }
+
+        std::string debug_report_flags_str(VkDebugReportFlagsEXT flags)
+        {
+            std::string str;
+            if (flags & VK_DEBUG_REPORT_ERROR_BIT_EXT) str += "\e[0;30;41m ERR \e[0m ";
+            if (flags & VK_DEBUG_REPORT_WARNING_BIT_EXT) str += "\e[0;30;43m WARN \e[0m ";
+            if (flags & VK_DEBUG_REPORT_PERFORMANCE_WARNING_BIT_EXT) str += "\e[0;30;45m PERF \e[0m ";
+            return str;
         }
 
         std::ostream & error()
@@ -243,7 +271,7 @@ namespace vulkan
         auto debug_report_simple(instance_handle_cref h)
         {
             return debug_report(h, [](
-                    auto /*flags*/,
+                    auto flags,
                     auto /*ob_type*/,
                     auto /*ob_source*/,
                     auto /*location*/,
@@ -251,9 +279,49 @@ namespace vulkan
                     auto layer,
                     auto message,
                     auto /*userdata*/) -> VkBool32 {
-                debug(layer) << message << "\n";
+                debug(layer) << debug_report_flags_str(flags) << message << "\n";
                 return false;
             });
+        }
+
+        auto device(
+                VkPhysicalDevice phy,
+                uint32_t queue_family_idx,
+                std::vector<char const*> const& exts={},      // extensions
+                std::vector<char const*> const& layers={},    // layers
+                VkAllocationCallbacks const* alloc={})
+        {
+            float queue_priority = 0;
+            VkDeviceQueueCreateInfo queue_info {
+                .sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
+                .queueFamilyIndex = queue_family_idx,
+                .queueCount = 1,
+                .pQueuePriorities = &queue_priority,
+            };
+
+            VkDeviceCreateInfo info {
+                .sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
+                .enabledExtensionCount = static_cast<uint32_t>(exts.size()),
+                .ppEnabledExtensionNames = exts.data(),
+                .enabledLayerCount = static_cast<uint32_t>(layers.size()),
+                .ppEnabledLayerNames = layers.data(),
+                .queueCreateInfoCount = 1,
+                .pQueueCreateInfos = &queue_info,
+            };
+            VkDevice raw;
+
+            die_unless(vkCreateDevice(phy, &info, alloc, &raw));
+            return handle(raw, vkDestroyDevice, alloc);
+        }
+
+        auto device_simple(VkPhysicalDevice phy, uint32_t queue_family_idx, bool debug=true)
+        {
+            if (!debug) return device(phy, queue_family_idx);
+            return device(
+                    phy,
+                    queue_family_idx,
+                    {},
+                    { "VK_LAYER_LUNARG_standard_validation" });
         }
 
         auto physical_devices(instance_handle_cref h)
@@ -281,10 +349,59 @@ namespace vulkan
                 props.emplace_back(properties(dev));
             return props;
         }
-    }
 
+        auto queue_familys(VkPhysicalDevice phy)
+        {
+            std::vector<VkQueueFamilyProperties> familys;
+            uint32_t num;
+            vkGetPhysicalDeviceQueueFamilyProperties(phy, &num, nullptr);
+            familys.resize(num);
+            vkGetPhysicalDeviceQueueFamilyProperties(phy, &num, familys.data());
+            return familys;
+        }
+    }
 }
 namespace vk = vulkan;
+
+namespace application
+{
+    namespace priv
+    {
+        using namespace vk::io;
+        using namespace vk::ops;
+
+        namespace pub
+        {
+            void print_info(VkPhysicalDevice phy)
+            {
+                auto prop = vk::properties(phy);
+                prompt(vk::physical_type_str(prop.deviceType)) << prop.deviceName << "\n";
+
+                int queue_family_idx = -1;
+                {
+                    int i = 0;
+                    for (auto & fam: vk::queue_familys(phy)) {
+                        info();
+                        prompt(std::to_string(i)) <<
+                            fam.queueCount << "× Queue[" <<
+                            vk::queue_flags_str(fam.queueFlags) << "] " <<
+                            fam.minImageTransferGranularity << "\n";
+                        if (fam.queueCount >= 1 &&
+                                (fam.queueFlags & VK_QUEUE_GRAPHICS_BIT))
+                            queue_family_idx = i;
+                        i++;
+                    }
+                }
+                prompt("SELECT QUEUE FAMILY");
+                prompt(std::to_string(queue_family_idx)) << "\n";
+
+                auto dev = vk::device_simple(phy, queue_family_idx);
+            }
+        }
+    }
+    using namespace priv::pub;
+}
+namespace app = application;
 
 int main()
 {
@@ -293,28 +410,9 @@ int main()
     auto debug = vk::debug_report_simple(instance);
 
     auto physicals = vk::physical_devices(instance);
-    auto props_per_phy = vk::properties(physicals);
-    (physicals.size() == 0 ? error() : info()) << physicals.size() << " physicals:\n";
+    (physicals.size() == 0 ? error() : info()) << physicals.size() << " physicals.\n";
 
-    int i = 0;
-    for (auto& props: props_per_phy) {
-        prompt(std::to_string(i)) << "[" << vk::physical_type_str(props.deviceType) << "] " << props.deviceName << "\n";
-        i++;
-    }
-
-    switch (physicals.size()) {
-        case 0:
-            error() << "no compatible devices.\n";
-            return 0;
-        case 1:
-            i = 0;
-            prompt("SELECT A DEVICE:");
-            prompt("0") << "\n";
-            break;
-        default:
-            if (!input(i, "SELECT A DEVICE:"))
-                return 0;
-            break;
-    }
+    for (auto & phy: physicals)
+        app::print_info(phy);
 }
 
