@@ -1,0 +1,26 @@
+[0;32mrunning [1;35m/tmp/makeless-build[0;32m by [0;35menv VK_LAYER_PATH=/usr/share/vulkan/explicit_layer.d $bin[0m...
+[0;30;44m OBJTRACK [0m OBJ[1] : CREATE VK_DEBUG_REPORT_OBJECT_TYPE_PHYSICAL_DEVICE_EXT object 0x1a005f0
+[0;30;42m INFO [0m 1 physicals.
+[0;30;43m INTEGRATED_GPU [0m Intel(R) Ivybridge Mobile
+[0;30;42m INFO [0m [0;30;43m 0 [0m 1× Queue[GCT-] extent<3>{1, 1, 1}
+[0;30;43m SELECT QUEUE FAMILY [0m [0;30;43m 0 [0m
+[0;30;44m loader [0m Found meta layer VK_LAYER_LUNARG_standard_validation, replacing with actual layer group
+[0;30;44m loader [0m Insert device layer VK_LAYER_GOOGLE_unique_objects (libVkLayer_unique_objects.so)
+[0;30;44m loader [0m Insert device layer VK_LAYER_LUNARG_swapchain (libVkLayer_swapchain.so)
+[0;30;44m loader [0m Insert device layer VK_LAYER_LUNARG_draw_state (libVkLayer_draw_state.so)
+[0;30;44m loader [0m Insert device layer VK_LAYER_LUNARG_mem_tracker (libVkLayer_mem_tracker.so)
+[0;30;44m loader [0m Insert device layer VK_LAYER_LUNARG_image (libVkLayer_image.so)
+[0;30;44m loader [0m Insert device layer VK_LAYER_LUNARG_object_tracker (libVkLayer_object_tracker.so)
+[0;30;44m loader [0m Insert device layer VK_LAYER_LUNARG_device_limits (libVkLayer_device_limits.so)
+[0;30;44m loader [0m Insert device layer VK_LAYER_LUNARG_param_checker (libVkLayer_param_checker.so)
+[0;30;44m loader [0m Insert device layer VK_LAYER_LUNARG_threading (libVkLayer_threading.so)
+[0;30;44m OBJTRACK [0m OBJ[2] : CREATE VK_DEBUG_REPORT_OBJECT_TYPE_DEVICE_EXT object 0x1a802c0
+[0;30;44m OBJTRACK [0m OBJ_STAT Destroy VK_DEBUG_REPORT_OBJECT_TYPE_DEVICE_EXT obj 0x1a802c0 (2 total objs remain & 0 VK_DEBUG_REPORT_OBJECT_TYPE_DEVICE_EXT objs).
+[0;30;44m MEM [0m Printing List details prior to vkDestroyDevice()
+[0;30;44m MEM [0m ================================================
+[0;30;44m MEM [0m Details of Memory Object list (of size 0 elements)
+[0;30;44m MEM [0m =============================
+[0;30;44m MEM [0m Details of CB list (of size 0 elements)
+[0;30;44m MEM [0m ==================
+[0;34mprogram [1;35m/tmp/makeless-build [0;34mreturned [0m[[1;31m0[0m]
+
