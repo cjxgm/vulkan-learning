@@ -1,0 +1,5 @@
+= vulkan info
+
+Clear image to a specific color.
+Fetch the image and write to disk in PPM format.
+
